@@ -1,0 +1,324 @@
+# File structure (minimal):
+# bootstrap/
+# ├── deploy.sh
+# ├── app-of-apps.yaml
+# └── apps/
+#     ├── nginx-ingress.yaml
+#     └── monitoring.yaml
+
+---
+# bootstrap/deploy.sh - One command to bootstrap everything
+#!/bin/bash
+set -e
+
+CLOUD_PROVIDER=${1:-"azure"}
+GITOPS_REPO=${2:-"https://github.com/your-org/k8s-gitops"}
+
+echo "Bootstrapping cluster with ArgoCD..."
+
+# Install ArgoCD
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Wait for ArgoCD
+echo "Waiting for ArgoCD..."
+kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=300s
+
+# Create bootstrap app
+envsubst << 'EOF' | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bootstrap
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ${GITOPS_REPO}
+    path: bootstrap/apps
+    targetRevision: HEAD
+    helm:
+      parameters:
+      - name: cloudProvider
+        value: ${CLOUD_PROVIDER}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+EOF
+
+echo "Bootstrap complete!"
+echo "ArgoCD Password: $(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)"
+echo "Access ArgoCD: kubectl port-forward svc/argocd-server -n argocd 8080:443"
+
+---
+# bootstrap/apps/nginx-ingress.yaml - Just nginx-ingress
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-ingress
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes.github.io/ingress-nginx
+    chart: ingress-nginx
+    targetRevision: 4.8.3
+    helm:
+      values: |
+        controller:
+          service:
+            type: LoadBalancer
+            annotations:
+              {{- if eq .Values.cloudProvider "azure" }}
+              service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+              service.beta.kubernetes.io/azure-load-balancer-health-probe-port: "10254"
+              service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/healthz"
+              {{- else if eq .Values.cloudProvider "aws" }}
+              service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+              service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+              service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+              {{- else if eq .Values.cloudProvider "gcp" }}
+              cloud.google.com/load-balancer-type: "Internal"
+              {{- end }}
+          
+          # Basic resource limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 90Mi
+            limits:
+              cpu: 1000m
+              memory: 500Mi
+          
+          # Enable metrics
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# bootstrap/apps/monitoring.yaml - Just kube-prometheus-stack
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 55.5.0
+    helm:
+      values: |
+        # Prometheus
+        prometheus:
+          prometheusSpec:
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  {{- if eq .Values.cloudProvider "azure" }}
+                  storageClassName: managed-csi
+                  {{- else if eq .Values.cloudProvider "aws" }}
+                  storageClassName: gp3
+                  {{- else if eq .Values.cloudProvider "gcp" }}
+                  storageClassName: standard-rwo
+                  {{- end }}
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 20Gi
+            retention: 7d
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                cpu: 1000m
+                memory: 2Gi
+        
+        # Grafana
+        grafana:
+          adminPassword: "admin123"  # Change this!
+          
+          persistence:
+            enabled: true
+            {{- if eq .Values.cloudProvider "azure" }}
+            storageClassName: managed-csi
+            {{- else if eq .Values.cloudProvider "aws" }}
+            storageClassName: gp3
+            {{- else if eq .Values.cloudProvider "gcp" }}
+            storageClassName: standard-rwo
+            {{- end }}
+            size: 5Gi
+          
+          # Simple ingress
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "false"
+            hosts:
+            - grafana.internal
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        
+        # AlertManager
+        alertmanager:
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  {{- if eq .Values.cloudProvider "azure" }}
+                  storageClassName: managed-csi
+                  {{- else if eq .Values.cloudProvider "aws" }}
+                  storageClassName: gp3
+                  {{- else if eq .Values.cloudProvider "gcp" }}
+                  storageClassName: standard-rwo
+                  {{- end }}
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 5Gi
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 200m
+                memory: 256Mi
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# Usage - literally just this:
+
+# 1. Create a Git repo with these files
+# 2. Run the bootstrap script:
+./bootstrap/deploy.sh azure
+
+# That's it! You get:
+# - ArgoCD managing itself
+# - nginx-ingress with internal LB  
+# - Full monitoring stack with Grafana
+# - Everything automatically synced from Git
+
+# Access:
+# - ArgoCD UI: kubectl port-forward svc/argocd-server -n argocd 8080:443
+# - Grafana: http://grafana.internal (add to /etc/hosts with nginx LB IP)
+
+---
+# Optional: Add a simple test app
+# bootstrap/apps/test-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops
+    path: test-app
+    targetRevision: HEAD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# test-app/deployment.yaml - Simple test deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-test
+  namespace: test-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-test
+  template:
+    metadata:
+      labels:
+        app: nginx-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+
+---
+# test-app/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-test
+  namespace: test-app
+spec:
+  selector:
+    app: nginx-test
+  ports:
+  - port: 80
+    targetPort: 80
+
+---
+# test-app/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-test
+  namespace: test-app
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: test.internal
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-test
+            port:
+              number: 80
