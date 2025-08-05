@@ -1,0 +1,112 @@
+---
+# infrastructure/monitoring/values.yaml
+# Cloud-agnostic monitoring configuration
+cloudProvider: azure
+
+kube-prometheus-stack:
+  # Prometheus configuration
+  prometheus:
+    prometheusSpec:
+      # Storage configuration (will use platform-specific storage class)
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: "{{ .Values.storageClass.default }}"
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 50Gi
+      
+      # Retention policy
+      retention: 30d
+      retentionSize: 45GB
+      
+      # Node selection
+      nodeSelector:
+        environment: "{{ .Values.environment }}"
+      
+      # Resource limits
+      resources:
+        requests:
+          cpu: 500m
+          memory: 2Gi
+        limits:
+          cpu: 2000m
+          memory: 8Gi
+  
+  # Grafana configuration
+  grafana:
+    # Admin credentials
+    adminPassword: "{{ .Values.grafana.adminPassword | default "admin" }}"
+    
+    # Persistence
+    persistence:
+      enabled: true
+      storageClassName: "{{ .Values.storageClass.default }}"
+      size: 10Gi
+    
+    # Node selection
+    nodeSelector:
+      environment: "{{ .Values.environment }}"
+    
+    # Ingress configuration
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      hosts:
+        - grafana-{{ .Values.environment }}.{{ .Values.domain }}
+    
+    # Grafana configuration
+    grafana.ini:
+      server:
+        root_url: "http://grafana-{{ .Values.environment }}.{{ .Values.domain }}"
+      security:
+        allow_embedding: true
+      auth:
+        disable_login_form: false
+      auth.anonymous:
+        enabled: false
+    
+    # Resource configuration
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  
+  # AlertManager configuration
+  alertmanager:
+    alertmanagerSpec:
+      storage:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: "{{ .Values.storageClass.default }}"
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi
+      
+      nodeSelector:
+        environment: "{{ .Values.environment }}"
+      
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/ssl-redirect: "false"
+        nginx.ingress.kubernetes.io/auth-type: basic
+        nginx.ingress.kubernetes.io/auth-secret: prometheus-basic-auth
+      hosts:
+        - alertmanager-{{ .Values.environment }}.{{ .Values.domain }}

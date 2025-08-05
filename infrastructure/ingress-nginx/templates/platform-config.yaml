@@ -1,0 +1,17 @@
+---
+# infrastructure/ingress-nginx/templates/platform-config.yaml
+# This template merges platform-specific annotations
+{{- $platformValues := index .Values "platforms" .Values.cloudProvider -}}
+{{- if $platformValues }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-platform-config
+  namespace: {{ .Release.Namespace }}
+data:
+  cloudProvider: {{ .Values.cloudProvider }}
+  {{- if $platformValues.loadBalancer }}
+  loadBalancerConfig: |
+    {{- toYaml $platformValues.loadBalancer | nindent 4 }}
+  {{- end }}
+{{- end }}

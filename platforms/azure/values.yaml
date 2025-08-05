@@ -1,0 +1,55 @@
+---
+# platforms/azure/values.yaml
+# Azure-specific configurations
+cloudProvider: azure
+domain: internal
+
+# Load balancer configuration for Azure
+loadBalancer:
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-port: "10254"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/healthz"
+    # Uncomment if you need specific subnet
+    # service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "internal-subnet"
+
+# Storage class mapping
+storageClass:
+  default: managed-csi
+  ssd: managed-csi-premium
+
+# Node selector for Azure
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Azure-specific tolerations
+tolerations:
+  - key: "CriticalAddonsOnly"
+    operator: "Exists"
+
+---
+# platforms/aws/values.yaml
+# AWS-specific configurations
+cloudProvider: aws
+domain: internal
+
+# Load balancer configuration for AWS
+loadBalancer:
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+
+# Storage class mapping
+storageClass:
+  default: gp3
+  ssd: gp3
+
+# Node selector for AWS
+nodeSelector:
+  kubernetes.io/os: linux
+
+# AWS-specific tolerations
+tolerations:
+  - key: "CriticalAddonsOnly"
+    operator: "Exists"

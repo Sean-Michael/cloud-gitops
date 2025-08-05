@@ -1,0 +1,126 @@
+---
+# environments/dev/microservices.yaml
+# ApplicationSet for all microservices
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: microservices
+  namespace: argocd
+spec:
+  generators:
+  # Read service definitions from git
+  - git:
+      repoURL: https://github.com/your-org/k8s-gitops
+      revision: HEAD
+      files:
+      - path: "applications/microservices/{{.Values.environment}}/*.yaml"
+  
+  template:
+    metadata:
+      name: '{{service.name}}-{{.Values.environment}}'
+      labels:
+        environment: '{{.Values.environment}}'
+        cloud-provider: '{{.Values.cloudProvider}}'
+        service-type: microservice
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/your-org/helm-charts
+        path: charts/microservice
+        targetRevision: HEAD
+        helm:
+          values: |
+            # Cloud-agnostic base configuration
+            image:
+              repository: {{service.image.repository}}
+              tag: {{service.image.tag}}
+              pullPolicy: IfNotPresent
+            
+            service:
+              type: ClusterIP
+              port: {{service.port | default 80}}
+              targetPort: {{service.targetPort | default 8080}}
+            
+            # Resource management
+            resources:
+              requests:
+                cpu: {{service.resources.requests.cpu | default "100m"}}
+                memory: {{service.resources.requests.memory | default "128Mi"}}
+              limits:
+                cpu: {{service.resources.limits.cpu | default "500m"}}
+                memory: {{service.resources.limits.memory | default "512Mi"}}
+            
+            # Horizontal Pod Autoscaler
+            autoscaling:
+              enabled: {{service.autoscaling.enabled | default false}}
+              minReplicas: {{service.autoscaling.minReplicas | default 1}}
+              maxReplicas: {{service.autoscaling.maxReplicas | default 10}}
+              targetCPUUtilizationPercentage: {{service.autoscaling.targetCPU | default 80}}
+            
+            # Health checks
+            healthCheck:
+              enabled: {{service.healthCheck.enabled | default true}}
+              livenessProbe:
+                path: {{service.healthCheck.liveness.path | default "/health"}}
+                port: {{service.healthCheck.liveness.port | default service.targetPort}}
+              readinessProbe:
+                path: {{service.healthCheck.readiness.path | default "/ready"}}
+                port: {{service.healthCheck.readiness.port | default service.targetPort}}
+            
+            # Ingress configuration (cloud-agnostic)
+            ingress:
+              enabled: {{service.ingress.enabled | default true}}
+              className: "nginx"
+              annotations:
+                nginx.ingress.kubernetes.io/ssl-redirect: "false"
+                {{- if service.ingress.auth}}
+                nginx.ingress.kubernetes.io/auth-type: basic
+                nginx.ingress.kubernetes.io/auth-secret: {{service.ingress.authSecret | default "basic-auth"}}
+                {{- end}}
+                {{- if service.ingress.rateLimit}}
+                nginx.ingress.kubernetes.io/rate-limit: "{{service.ingress.rateLimit}}"
+                nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+                {{- end}}
+                {{- range $key, $value := service.ingress.customAnnotations}}
+                {{$key}}: "{{$value}}"
+                {{- end}}
+              hosts:
+              - host: {{service.name}}-{{.Values.environment}}.{{.Values.domain}}
+                paths:
+                - path: {{service.ingress.path | default "/"}}
+                  pathType: {{service.ingress.pathType | default "Prefix"}}
+            
+            # Environment-specific configuration
+            environment: {{.Values.environment}}
+            cloudProvider: {{.Values.cloudProvider}}
+            
+            # Node selection (cloud-agnostic labels)
+            nodeSelector:
+              environment: {{.Values.environment}}
+              {{- if .Values.nodeSelector}}
+              {{- range $key, $value := .Values.nodeSelector}}
+              {{$key}}: {{$value}}
+              {{- end}}
+              {{- end}}
+            
+            # Tolerations for dedicated node pools
+            tolerations:
+            {{- if .Values.tolerations}}
+            {{- range .Values.tolerations}}
+            - key: {{.key}}
+              operator: {{.operator | default "Equal"}}
+              value: {{.value}}
+              effect: {{.effect}}
+            {{- end}}
+            {{- end}}
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{service.namespace | default service.name}}'
+      
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true

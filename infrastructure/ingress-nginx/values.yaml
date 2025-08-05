@@ -1,0 +1,60 @@
+---
+# infrastructure/ingress-nginx/values.yaml
+# Default values for nginx ingress (cloud-agnostic)
+cloudProvider: azure  # Will be overridden by platform values
+
+ingress-nginx:
+  controller:
+    service:
+      type: LoadBalancer
+      # Annotations will be merged with platform-specific ones
+      annotations: {}
+    
+    # Resource configuration
+    resources:
+      requests:
+        cpu: 100m
+        memory: 90Mi
+      limits:
+        cpu: 1000m
+        memory: 500Mi
+    
+    # Node selection
+    nodeSelector:
+      kubernetes.io/os: linux
+    
+    # Tolerations
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+    
+    # Metrics for monitoring
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        additionalLabels:
+          app: ingress-nginx
+    
+    # Configuration for better performance
+    config:
+      compute-full-forwarded-for: "true"
+      use-forwarded-headers: "true"
+      proxy-body-size: "0"
+      proxy-read-timeout: "600"
+      proxy-send-timeout: "600"
+    
+    # Replica configuration
+    replicaCount: 2
+    
+    # Pod disruption budget
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    
+    # Autoscaling
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 80

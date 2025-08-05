@@ -1,0 +1,26 @@
+---
+# environments/dev/infrastructure.yaml
+# Infrastructure applications for dev environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops
+    path: infrastructure
+    targetRevision: HEAD
+    helm:
+      valueFiles:
+        - ../platforms/{{.Values.cloudProvider}}/values.yaml
+        - ../environments/{{.Values.environment}}/infrastructure-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

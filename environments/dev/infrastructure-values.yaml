@@ -1,0 +1,33 @@
+---
+# environments/dev/infrastructure-values.yaml
+# Environment-specific infrastructure values
+environment: dev
+
+# Nginx Ingress Controller configuration
+nginxIngress:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 90Mi
+    limits:
+      cpu: 1000m
+      memory: 500Mi
+
+# Monitoring stack configuration
+monitoring:
+  enabled: true
+  prometheus:
+    retention: 7d
+    storage: 20Gi
+  grafana:
+    adminPassword: dev-password
+    storage: 5Gi
+
+# Default node selector for environment
+nodeSelector:
+  environment: dev
+
+# Domain configuration
+domain: dev.cluster.internal

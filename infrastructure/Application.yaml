@@ -1,0 +1,53 @@
+---
+# infrastructure/Application.yaml
+# ArgoCD Application for infrastructure
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-ingress
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops
+    path: infrastructure/ingress-nginx
+    targetRevision: HEAD
+    helm:
+      valueFiles:
+        - ../../platforms/{{ .Values.cloudProvider }}/values.yaml
+        - ../../environments/{{ .Values.environment }}/infrastructure-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/k8s-gitops
+    path: infrastructure/monitoring
+    targetRevision: HEAD
+    helm:
+      valueFiles:
+        - ../../platforms/{{ .Values.cloudProvider }}/values.yaml
+        - ../../environments/{{ .Values.environment }}/infrastructure-values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
